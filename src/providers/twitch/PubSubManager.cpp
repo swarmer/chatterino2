@@ -108,12 +108,22 @@ void PubSub::stop()
 {
     this->stopping_ = true;
 
+    // Capture shared_ptrs to all clients to ensure they stay alive
+    // and to avoid accessing the clients map from the posted lambda
+    std::vector<std::shared_ptr<PubSubClient>> clientsCopy;
+    clientsCopy.reserve(this->clients.size());
     for (const auto &[hdl, client] : this->clients)
     {
-        (void)hdl;
-
-        client->close("Shutting down");
+        clientsCopy.push_back(client);
     }
+
+    boost::asio::post(this->websocketClient.get_io_service(),
+                      [clients = std::move(clientsCopy)] {
+        for (const auto &client : clients)
+        {
+            client->close("Shutting down");
+        }
+    });
 
     this->work.reset();
 

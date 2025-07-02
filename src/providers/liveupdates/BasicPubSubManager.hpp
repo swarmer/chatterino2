@@ -143,10 +143,25 @@ public:
 
         this->stopping_ = true;
 
-        for (const auto &client : this->clients_)
+        // Post the graceful close of all clients to the websocket thread.
+        // This prevents concurrent access to `clients_` while it may still be
+        // modified from connection callbacks during shutdown.
+        // Capture shared_ptrs to all clients to ensure they stay alive
+        // and to avoid accessing the clients_ map from the posted lambda
+        std::vector<std::shared_ptr<BasicPubSubClient<Subscription>>> clientsCopy;
+        clientsCopy.reserve(this->clients_.size());
+        for (const auto &[hdl, client] : this->clients_)
         {
-            client.second->close("Shutting down");
+            clientsCopy.push_back(client);
         }
+
+        boost::asio::post(this->websocketClient_.get_io_service(),
+                          [clients = std::move(clientsCopy)] {
+            for (const auto &client : clients)
+            {
+                client->close("Shutting down");
+            }
+        });
 
         this->work_.reset();
 
